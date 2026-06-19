@@ -1,31 +1,3 @@
-"""
-src/visualization.py
-=====================
-Thành viên 4: Data Visualization
-
-Nhiệm vụ:
-    - plot_dendrogram(): vẽ cây phân cụm (dendrogram) từ linkage matrix
-      (output của AgglomerativeClustering.fit() — src/clustering.py, Thành viên 3).
-    - plot_biclustering_heatmap(): vẽ heatmap kết hợp dendrogram 2 chiều
-      (cluster cả genes và samples) bằng seaborn.clustermap.
-
-Pipeline đầu vào (tổng hợp từ cả nhóm):
-    1. data_preprocessing.py (TV1) -> trả về expr_norm: DataFrame (n_genes x n_samples),
-       index = Gene Accession Number, đã chuẩn hoá Z-score.
-    2. metrics.py (TV2)            -> calculate_euclidean_distance(X) / calculate_pearson_distance(X)
-    3. clustering.py (TV3)         -> AgglomerativeClustering().fit(X, metric_function)
-                                       trả về linkage_matrix dạng chuẩn scipy (n-1, 4).
-    4. visualization.py (TV4, file này) -> vẽ dendrogram + heatmap, lưu vào results/.
-
-Lưu ý quan trọng về hiệu năng:
-    AgglomerativeClustering.fit() của TV3 cài đặt theo kiểu thủ công (O(n^3)),
-    nên phân cụm TOÀN BỘ ~1600+ gen sau khi lọc sẽ mất vài phút. Vì vậy
-    plot_biclustering_heatmap() hỗ trợ sẵn việc chỉ vẽ top N gen có độ biến
-    thiên (variance) cao nhất — đây cũng là cách làm chuẩn trong các bài
-    phân tích gene expression thực tế (vẽ hết hàng nghìn gen sẽ không đọc
-    được và rất chậm).
-"""
-
 import os
 
 import matplotlib
