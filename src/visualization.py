@@ -1,321 +1,296 @@
 """
 src/visualization.py
 =====================
-Thanh vien 4: Data Visualization
+Thành viên 4: Data Visualization
 
-Nhiem vu:
-    - plot_dendrogram(): ve cay phan cum (dendrogram) tu linkage matrix
-    - plot_biclustering_heatmap(): ve heatmap ket hop voi dendrogram hai chieu
-      (cluster ca genes va ca samples)
+Nhiệm vụ:
+    - plot_dendrogram(): vẽ cây phân cụm (dendrogram) từ linkage matrix
+      (output của AgglomerativeClustering.fit() — src/clustering.py, Thành viên 3).
+    - plot_biclustering_heatmap(): vẽ heatmap kết hợp dendrogram 2 chiều
+      (cluster cả genes và samples) bằng seaborn.clustermap.
 
-Input cua module nay chinh la output cua Thanh vien 3 (src/clustering.py):
-    - linkage_matrix: numpy array dang chuan scipy linkage, shape (n_samples-1, 4)
-      moi dong la [idx1, idx2, distance, sample_count]
-    - data: ma tran numpy (genes x samples) da duoc chuan hoa, dung de ve heatmap
+Pipeline đầu vào (tổng hợp từ cả nhóm):
+    1. data_preprocessing.py (TV1) -> trả về expr_norm: DataFrame (n_genes x n_samples),
+       index = Gene Accession Number, đã chuẩn hoá Z-score.
+    2. metrics.py (TV2)            -> calculate_euclidean_distance(X) / calculate_pearson_distance(X)
+    3. clustering.py (TV3)         -> AgglomerativeClustering().fit(X, metric_function)
+                                       trả về linkage_matrix dạng chuẩn scipy (n-1, 4).
+    4. visualization.py (TV4, file này) -> vẽ dendrogram + heatmap, lưu vào results/.
 
-Tat ca hinh anh output se duoc luu vao thu muc results/.
+Lưu ý quan trọng về hiệu năng:
+    AgglomerativeClustering.fit() của TV3 cài đặt theo kiểu thủ công (O(n^3)),
+    nên phân cụm TOÀN BỘ ~1600+ gen sau khi lọc sẽ mất vài phút. Vì vậy
+    plot_biclustering_heatmap() hỗ trợ sẵn việc chỉ vẽ top N gen có độ biến
+    thiên (variance) cao nhất — đây cũng là cách làm chuẩn trong các bài
+    phân tích gene expression thực tế (vẽ hết hàng nghìn gen sẽ không đọc
+    được và rất chậm).
 """
 
 import os
 
 import matplotlib
-matplotlib.use("Agg")  # khong can man hinh, chi luu file -> tranh loi khi chay tren server/CI
+matplotlib.use("Agg")  # không cần màn hình, chỉ lưu file -> tránh lỗi khi chạy trên server/CI
+
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 from scipy.cluster.hierarchy import dendrogram
-from scipy.spatial.distance import squareform
 
 
-# ---------------------------------------------------------------------------
-# Cau hinh chung
-# ---------------------------------------------------------------------------
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "results")
+# ===========================================================================
+# CẤU HÌNH THƯ MỤC
+# ===========================================================================
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
 
 
 def _ensure_results_dir(results_dir: str = RESULTS_DIR) -> str:
-    """Tao thu muc results/ neu chua ton tai."""
+    """Tạo thư mục results/ nếu chưa tồn tại. An toàn với path rỗng."""
+    if not results_dir:
+        results_dir = RESULTS_DIR
     os.makedirs(results_dir, exist_ok=True)
     return results_dir
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # 1. plot_dendrogram
-# ---------------------------------------------------------------------------
+# ===========================================================================
 def plot_dendrogram(
     linkage_matrix: np.ndarray,
     labels=None,
-    title: str = "Hierarchical Clustering Dendrogram",
+    title: str = "Dendrogram",
     color_threshold: float = None,
-    orientation: str = "top",
     figsize: tuple = (12, 6),
     save_path: str = None,
-    show: bool = False,
 ):
     """
-    Ve dendrogram tu linkage matrix (output cua Thanh vien 3).
+    Vẽ biểu đồ cây phân cụm (Dendrogram) từ linkage matrix.
 
-    Tham so
+    Tham số
     -------
-    linkage_matrix : np.ndarray
-        Ma tran lien ket dang chuan scipy, shape (n-1, 4).
-        Day chinh la output tu ham AgglomerativeClustering() cua Thanh vien 3.
+    linkage_matrix : np.ndarray, shape (n-1, 4)
+        Output trực tiếp từ AgglomerativeClustering().fit() của Thành viên 3.
     labels : list[str], optional
-        Ten cac mau/gen tuong ung voi tung diem du lieu goc.
-        Neu None, scipy se tu danh so thu tu.
+        Tên mẫu/gen tương ứng với từng điểm dữ liệu gốc (vd: tên bệnh nhân
+        hoặc Gene Accession Number). Nếu None, scipy tự đánh số.
     title : str
-        Tieu de bieu do.
+        Tiêu đề biểu đồ.
     color_threshold : float, optional
-        Nguong khoang cach de to mau cac nhanh khac nhau (phan biet cluster).
-        Neu None, scipy tu chon nguong mac dinh.
-    orientation : str
-        Huong ve: "top", "bottom", "left", "right".
+        Ngưỡng khoảng cách để tô màu phân biệt các nhánh/cụm.
+        Nếu None, toàn bộ cây vẽ 1 màu (an toàn, không phụ thuộc vào scipy
+        tự đoán ngưỡng).
     figsize : tuple
-        Kich thuoc hinh (rong, cao) tinh bang inch.
+        Kích thước hình (rộng, cao) tính bằng inch.
     save_path : str, optional
-        Duong dan luu file. Neu None, tu dong luu vao results/dendrogram.png
-    show : bool
-        True neu muon hien thi hinh ngay (plt.show()), thuong dat False khi chay batch.
+        Đường dẫn lưu file. Nếu None, tự động lưu vào results/dendrogram.png
 
-    Tra ve
+    Trả về
     ------
-    dict : ket qua tra ve tu scipy.cluster.hierarchy.dendrogram
-           (chua thong tin thu tu la, mau sac... co the dung lai cho heatmap)
+    dict : kết quả trả về từ scipy.cluster.hierarchy.dendrogram
     """
     if linkage_matrix is None or len(linkage_matrix) == 0:
         raise ValueError(
-            "linkage_matrix dang rong. Hay chac chan da nhan duoc output "
-            "tu ham AgglomerativeClustering() cua Thanh vien 3."
+            "linkage_matrix đang rỗng. Hãy đảm bảo đã nhận đúng output "
+            "từ AgglomerativeClustering().fit() của Thành viên 3."
         )
 
-    fig, ax = plt.subplots(figsize=figsize)
+    plt.figure(figsize=figsize)
 
     ddata = dendrogram(
         linkage_matrix,
         labels=labels,
-        color_threshold=color_threshold,
-        orientation=orientation,
-        ax=ax,
-        leaf_rotation=90 if orientation in ("top", "bottom") else 0,
+        leaf_rotation=90,
         leaf_font_size=8,
+        color_threshold=color_threshold,
     )
 
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    if orientation in ("top", "bottom"):
-        ax.set_xlabel("Samples / Genes")
-        ax.set_ylabel("Distance")
-    else:
-        ax.set_xlabel("Distance")
-        ax.set_ylabel("Samples / Genes")
-
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    fig.tight_layout()
+    plt.title(title, fontsize=14, fontweight="bold")
+    plt.xlabel("Mẫu / Gen", fontsize=12)
+    plt.ylabel("Khoảng cách", fontsize=12)
+    plt.tight_layout()
 
     if save_path is None:
-        results_dir = _ensure_results_dir()
-        save_path = os.path.join(results_dir, "dendrogram.png")
+        save_path = os.path.join(_ensure_results_dir(), "dendrogram.png")
     else:
-        _ensure_results_dir(os.path.dirname(save_path) or RESULTS_DIR)
+        _ensure_results_dir(os.path.dirname(save_path))
 
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"[visualization] Da luu dendrogram tai: {save_path}")
-
-    if show:
-        plt.show()
-    plt.close(fig)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"[visualization] Đã lưu Dendrogram tại: {save_path}")
+    plt.close()
 
     return ddata
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # 2. plot_biclustering_heatmap
-# ---------------------------------------------------------------------------
+# ===========================================================================
 def plot_biclustering_heatmap(
-    data: np.ndarray,
+    data,
     row_linkage: np.ndarray = None,
     col_linkage: np.ndarray = None,
-    row_labels=None,
-    col_labels=None,
+    row_labels="auto",
+    col_labels="auto",
     title: str = "Biclustering Heatmap",
-    cmap: str = "RdBu_r",
-    figsize: tuple = (12, 12),
+    cmap: str = "coolwarm",
+    figsize: tuple = (10, 10),
+    top_n_genes: int = None,
     save_path: str = None,
-    show: bool = False,
 ):
     """
-    Ve heatmap ket hop voi dendrogram (biclustering: cluster ca hang va cot).
+    Vẽ Heatmap kết hợp dendrogram 2 chiều (genes và samples) bằng seaborn.clustermap.
 
-    Day la bieu do kinh dien trong phan tich gene expression: hang la genes,
-    cot la samples (hoac nguoc lai), mau sac the hien muc do bieu hien gen,
-    kem 2 dendrogram o canh tren va canh trai de minh hoa cau truc cum.
-
-    Tham so
+    Tham số
     -------
-    data : np.ndarray
-        Ma tran du lieu da chuan hoa (vd: Z-score), shape (n_genes, n_samples).
-        Day la du lieu da xu ly tu Thanh vien 1 (data_preprocessing.py).
+    data : pd.DataFrame hoặc np.ndarray, shape (n_genes, n_samples)
+        Ma trận biểu hiện gen đã chuẩn hoá (vd: expr_norm từ data_preprocessing.py
+        của Thành viên 1). Hàng = genes, cột = samples.
     row_linkage : np.ndarray, optional
-        Linkage matrix cho hang (thuong la genes). Neu None, khong ve dendrogram hang.
+        Linkage matrix cho hàng (genes), từ AgglomerativeClustering của TV3.
+        Nếu None, seaborn sẽ KHÔNG tự tính lại (tránh nhầm thuật toán) —
+        truyền vào row_cluster=False.
     col_linkage : np.ndarray, optional
-        Linkage matrix cho cot (thuong la samples). Neu None, khong ve dendrogram cot.
-    row_labels, col_labels : list[str], optional
-        Nhan cho hang/cot.
+        Linkage matrix cho cột (samples), từ AgglomerativeClustering của TV3.
+        Nếu None, tương tự không cluster cột.
+    row_labels, col_labels : list[str] hoặc "auto"
+        Nhãn cho hàng/cột. "auto" sẽ lấy tên từ index/columns nếu data là DataFrame.
     title : str
-        Tieu de bieu do.
+        Tiêu đề biểu đồ.
     cmap : str
-        Bang mau (mac dinh "RdBu_r": xanh = bieu hien thap, do = bieu hien cao).
+        Bảng màu (mặc định "coolwarm": xanh = biểu hiện thấp, đỏ = biểu hiện cao).
     figsize : tuple
-        Kich thuoc hinh.
+        Kích thước hình.
+    top_n_genes : int, optional
+        Nếu được set, chỉ vẽ N gen có phương sai (variance) cao nhất giữa các
+        mẫu — giúp heatmap dễ đọc và nhanh hơn khi số gen quá lớn (>200).
+        Khuyến nghị dùng khi vẽ trên toàn bộ tập gen đã lọc (thường 1000+ gen).
+        Lưu ý: nếu dùng tham số này CÙNG với row_linkage có sẵn, row_linkage
+        phải được tính lại tương ứng với đúng tập con N gen này (xem phần
+        demo ở cuối file để biết cách làm).
     save_path : str, optional
-        Duong dan luu file. Neu None, tu dong luu vao results/biclustering_heatmap.png
-    show : bool
-        True neu muon hien thi hinh ngay.
+        Đường dẫn lưu file. Nếu None, tự động lưu vào results/biclustering_heatmap.png
 
-    Tra ve
+    Trả về
     ------
-    matplotlib.figure.Figure
+    seaborn.matrix.ClusterGrid
     """
-    if data is None or data.size == 0:
-        raise ValueError("Du lieu dau vao (data) dang rong.")
+    if data is None or len(data) == 0:
+        raise ValueError("Dữ liệu đầu vào (data) đang rỗng.")
 
-    n_rows, n_cols = data.shape
+    # Chuẩn hoá data về DataFrame để dễ thao tác nhãn
+    if not isinstance(data, pd.DataFrame):
+        data = pd.DataFrame(data)
 
-    # Bo cuc luoi: dendrogram tren (cot), dendrogram trai (hang), heatmap chinh, colorbar
-    fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(
-        2, 3,
-        width_ratios=[1, 4, 0.2],
-        height_ratios=[1, 4],
-        wspace=0.02, hspace=0.02,
+    # Lọc top N gen có variance cao nhất (nếu được yêu cầu)
+    if top_n_genes is not None and top_n_genes < data.shape[0]:
+        variances = data.var(axis=1)
+        top_idx = variances.sort_values(ascending=False).head(top_n_genes).index
+        data = data.loc[top_idx]
+        print(
+            f"[visualization] top_n_genes={top_n_genes}: đã lọc còn "
+            f"{data.shape[0]} gen có phương sai cao nhất để vẽ heatmap."
+        )
+        if row_linkage is not None and len(row_linkage) != data.shape[0] - 1:
+            print(
+                "[visualization] CẢNH BÁO: row_linkage được truyền vào không khớp "
+                "số gen sau khi lọc top_n_genes. Bỏ qua row_linkage, sẽ không "
+                "cluster theo hàng. Hãy tính lại linkage trên đúng tập con gen này."
+            )
+            row_linkage = None
+
+    row_cluster = row_linkage is not None
+    col_cluster = col_linkage is not None
+
+    g = sns.clustermap(
+        data,
+        row_linkage=row_linkage,
+        col_linkage=col_linkage,
+        row_cluster=row_cluster,
+        col_cluster=col_cluster,
+        xticklabels=col_labels,
+        yticklabels=row_labels,
+        cmap=cmap,
+        figsize=figsize,
+        dendrogram_ratio=(0.15, 0.15),
+        cbar_pos=(0.02, 0.8, 0.05, 0.18),
     )
 
-    ordered_data = data
-    row_order = np.arange(n_rows)
-    col_order = np.arange(n_cols)
+    # Xoay nhãn cho dễ đọc
+    plt.setp(g.ax_heatmap.get_xticklabels(), rotation=90, fontsize=7)
+    plt.setp(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=6)
 
-    # --- Dendrogram cot (tren) ---
-    ax_col_dendro = fig.add_subplot(gs[0, 1])
-    if col_linkage is not None and len(col_linkage) > 0:
-        col_ddata = dendrogram(col_linkage, ax=ax_col_dendro, no_labels=True,
-                                color_threshold=0, above_threshold_color="#444444")
-        col_order = np.array(col_ddata["leaves"])
-    ax_col_dendro.axis("off")
-
-    # --- Dendrogram hang (trai) ---
-    ax_row_dendro = fig.add_subplot(gs[1, 0])
-    if row_linkage is not None and len(row_linkage) > 0:
-        row_ddata = dendrogram(row_linkage, ax=ax_row_dendro, orientation="left",
-                                no_labels=True, color_threshold=0,
-                                above_threshold_color="#444444")
-        row_order = np.array(row_ddata["leaves"])
-    ax_row_dendro.axis("off")
-
-    # --- Sap xep lai du lieu theo thu tu cluster ---
-    ordered_data = data[np.ix_(row_order, col_order)]
-
-    # --- Heatmap chinh ---
-    ax_heatmap = fig.add_subplot(gs[1, 1])
-    im = ax_heatmap.imshow(ordered_data, aspect="auto", cmap=cmap,
-                            interpolation="nearest")
-
-    if col_labels is not None:
-        ax_heatmap.set_xticks(np.arange(n_cols))
-        ax_heatmap.set_xticklabels(
-            [col_labels[i] for i in col_order], rotation=90, fontsize=7
-        )
-    else:
-        ax_heatmap.set_xticks([])
-
-    if row_labels is not None and n_rows <= 60:
-        # chi hien nhan hang khi so gen khong qua nhieu, neu khong se roi
-        ax_heatmap.set_yticks(np.arange(n_rows))
-        ax_heatmap.set_yticklabels(
-            [row_labels[i] for i in row_order], fontsize=5.5
-        )
-        ax_heatmap.tick_params(axis="y", pad=2)
-    else:
-        ax_heatmap.set_yticks([])
-
-    ax_heatmap.set_xlabel("Samples")
-    ax_heatmap.set_ylabel("Genes")
-
-    # --- Colorbar ---
-    ax_cbar = fig.add_subplot(gs[1, 2])
-    cbar = fig.colorbar(im, cax=ax_cbar)
-    cbar.set_label("Expression level (Z-score)", fontsize=8)
-
-    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.98)
+    g.fig.suptitle(title, y=1.02, fontsize=14, fontweight="bold")
 
     if save_path is None:
-        results_dir = _ensure_results_dir()
-        save_path = os.path.join(results_dir, "biclustering_heatmap.png")
+        save_path = os.path.join(_ensure_results_dir(), "biclustering_heatmap.png")
     else:
-        _ensure_results_dir(os.path.dirname(save_path) or RESULTS_DIR)
+        _ensure_results_dir(os.path.dirname(save_path))
 
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    print(f"[visualization] Da luu biclustering heatmap tai: {save_path}")
+    g.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"[visualization] Đã lưu Heatmap tại: {save_path}")
+    plt.close(g.fig)
 
-    if show:
-        plt.show()
-    plt.close(fig)
-
-    return fig
+    return g
 
 
-# ---------------------------------------------------------------------------
-# Demo / self-test khi chay truc tiep file nay
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# DEMO / SELF-TEST — chạy thử với pipeline thật của cả nhóm
+# ===========================================================================
 if __name__ == "__main__":
-    """
-    Phan nay CHI dung de Thanh vien 4 tu kiem tra code khi cac module cua
-    Thanh vien 2 (metrics.py) va Thanh vien 3 (clustering.py) chua san sang.
+    import sys
+    import time
 
-    Mock: tu tinh linkage bang scipy de gia lap dung output ma Thanh vien 3
-    se tra ve (cung format), nham dam bao 2 ham tren chay dung truoc khi
-    ghep vao pipeline thuc cua main.py.
-    """
-    import pandas as pd
-    from scipy.cluster.hierarchy import linkage
-    from scipy.spatial.distance import pdist
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-    print("=== DEMO / SELF-TEST cho visualization.py (Thanh vien 4) ===")
+    from data_preprocessing import load_data, handle_missing_values, normalize_data
+    from metrics import calculate_euclidean_distance
+    from clustering import AgglomerativeClustering
 
-    # 1. Doc du lieu gen mau va chuan hoa nhe de demo
-    csv_path = "/mnt/user-data/uploads/data_set_ALL_AML_independent.csv"
-    df = pd.read_csv(csv_path)
+    print("=== DEMO: chạy thử visualization.py với pipeline thật ===")
 
-    # chi lay cac cot gia tri bieu hien gen (bo cot "call")
-    value_cols = [c for c in df.columns if c not in ("Gene Description", "Gene Accession Number")
-                  and not c.startswith("call")]
+    # 1. Đọc + tiền xử lý dữ liệu (TV1)
+    #    LƯU Ý: filter_genes() của TV1 hiện có lỗi lệch index (boolean mask
+    #    không khớp index khi lọc DataFrame). Nhóm cần TV1 sửa lại hàm này
+    #    (ví dụ reset_index trước khi tạo mask, hoặc set lại index thống nhất).
+    #    Demo dưới đây tạm thời bỏ qua filter_genes() để không bị chặn,
+    #    và lọc top gen theo variance ngay trong bước vẽ (top_n_genes).
+    df = load_data()
+    df_clean = handle_missing_values(df, strategy="median")
+    expr_norm, _ = normalize_data(df_clean, axis=0)
+    print("Dữ liệu sau chuẩn hoá:", expr_norm.shape, "(genes x samples)")
 
-    # lay mau 40 gen dau (de hinh ve khong qua nang) va chuan hoa Z-score theo hang
-    sample_df = df.iloc[:40][value_cols].astype(float)
-    gene_names = df.iloc[:40]["Gene Accession Number"].tolist()
-    sample_names = value_cols
+    # 2. Chọn top gen biến thiên nhiều nhất để demo nhanh (thay cho filter_genes)
+    TOP_N = 50
+    variances = expr_norm.var(axis=1)
+    top_genes = variances.sort_values(ascending=False).head(TOP_N).index
+    expr_subset = expr_norm.loc[top_genes]
+    print(f"Chọn top {TOP_N} gen có phương sai cao nhất để demo.")
 
-    matrix = sample_df.to_numpy()
-    z = (matrix - matrix.mean(axis=1, keepdims=True)) / (matrix.std(axis=1, keepdims=True) + 1e-9)
+    # 3. Tính linkage cho GENES (hàng) và SAMPLES (cột) bằng code thật của TV2 + TV3
+    t0 = time.time()
+    model = AgglomerativeClustering(linkage="average")
 
-    # 2. Mock output cua Thanh vien 3: tu tinh linkage cho hang (genes) va cot (samples)
-    row_link = linkage(pdist(z, metric="euclidean"), method="average")
-    col_link = linkage(pdist(z.T, metric="euclidean"), method="average")
+    row_link = model.fit(expr_subset.values, calculate_euclidean_distance)
+    print(f"Linkage genes: {row_link.shape}, thời gian: {time.time()-t0:.2f}s")
 
-    # 3. Goi 2 ham chinh cua Thanh vien 4
+    t0 = time.time()
+    col_link = model.fit(expr_subset.values.T, calculate_euclidean_distance)
+    print(f"Linkage samples: {col_link.shape}, thời gian: {time.time()-t0:.2f}s")
+
+    # 4. Vẽ dendrogram cho samples (34 bệnh nhân)
     plot_dendrogram(
-        row_link,
-        labels=gene_names,
-        title="Demo Dendrogram - Gene Clustering (mock data)",
-        save_path=os.path.join(_ensure_results_dir(), "demo_dendrogram.png"),
+        col_link,
+        labels=expr_subset.columns.tolist(),
+        title="Dendrogram - Phân cụm bệnh nhân (ALL/AML)",
+        save_path=os.path.join(_ensure_results_dir(), "demo_dendrogram_samples.png"),
     )
 
+    # 5. Vẽ biclustering heatmap (top 50 gen x 34 samples)
     plot_biclustering_heatmap(
-        z,
+        expr_subset,
         row_linkage=row_link,
         col_linkage=col_link,
-        row_labels=gene_names,
-        col_labels=sample_names,
-        title="Demo Biclustering Heatmap (mock data)",
+        title=f"Biclustering Heatmap - Top {TOP_N} gen biến thiên cao nhất",
         save_path=os.path.join(_ensure_results_dir(), "demo_biclustering_heatmap.png"),
     )
 
-    print("=== Hoan tat. Kiem tra anh trong thu muc results/ ===")
+    print("=== Hoàn tất. Kiểm tra ảnh trong thư mục results/ ===")
