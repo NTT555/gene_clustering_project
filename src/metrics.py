@@ -1,57 +1,18 @@
 import numpy as np
 
+def calculate_euclidean_distance(data: np.ndarray) -> np.ndarray:
+    """Tính ma trận khoảng cách Euclidean (O(N^2) vectorized)."""
+    # Khai triển: (A - B)^2 = A^2 + B^2 - 2AB
+    A_sq = np.sum(data**2, axis=1, keepdims=True)
+    B_sq = np.sum(data**2, axis=1, keepdims=True).T
+    AB = np.dot(data, data.T)
+    
+    distances_sq = np.clip(A_sq + B_sq - 2 * AB, a_min=0.0, a_max=None)
+    return np.sqrt(distances_sq)
 
-def calculate_euclidean_distance(data):
-
-    n_samples = data.shape[0]
-
-    distance_matrix = np.zeros((n_samples, n_samples))
-
-    for i in range(n_samples):
-        for j in range(i, n_samples):
-
-            distance = np.sqrt(
-                np.sum((data[i] - data[j]) ** 2)
-            )
-
-            distance_matrix[i][j] = distance
-            distance_matrix[j][i] = distance
-
-    return distance_matrix
-
-
-def calculate_pearson_distance(data):
-
-    n_samples = data.shape[0]
-
-    distance_matrix = np.zeros((n_samples, n_samples))
-
-    for i in range(n_samples):
-        for j in range(i, n_samples):
-
-            x = data[i]
-            y = data[j]
-
-            x_mean = np.mean(x)
-            y_mean = np.mean(y)
-
-            numerator = np.sum(
-                (x - x_mean) * (y - y_mean)
-            )
-
-            denominator = (
-                np.sqrt(np.sum((x - x_mean) ** 2))
-                * np.sqrt(np.sum((y - y_mean) ** 2))
-            )
-
-            if denominator == 0:
-                correlation = 0
-            else:
-                correlation = numerator / denominator
-
-            distance = 1 - correlation
-
-            distance_matrix[i][j] = distance
-            distance_matrix[j][i] = distance
-
-    return distance_matrix
+def calculate_pearson_distance(data: np.ndarray) -> np.ndarray:
+    """Tính ma trận khoảng cách Pearson: d = 1 - r"""
+    correlation_matrix = np.corrcoef(data)
+    dist_matrix = 1.0 - correlation_matrix
+    np.fill_diagonal(dist_matrix, 0)
+    return dist_matrix
