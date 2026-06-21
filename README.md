@@ -170,15 +170,3 @@ print(os.getcwd())
 * Áp dụng K-means / DBSCAN
 * Feature selection nâng cao
 * Tích hợp machine learning classifier
-
----
-
-## 👨‍💻 Tác giả
-
-* Your Name
-
----
-
-## 📜 License
-
-MIT License
