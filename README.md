@@ -1,172 +1,89 @@
-# 🧬 Gene Clustering Project (ALL vs AML)
+# 🧬 From-Scratch Hierarchical Clustering for Gene Expression Analysis
 
-## 📌 Giới thiệu
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Dự án này thực hiện **phân cụm gene expression** nhằm phân tích và khám phá sự khác biệt giữa hai loại bệnh:
+## 📌 Overview
+This repository contains a production-ready, modular implementation of **Agglomerative Hierarchical Clustering from scratch** (without using `scikit-learn` for clustering core logic). The engine is applied to a high-dimensional microarray dataset (`data_set_ALL_AML_independent.csv`) to classify leukemia patients into distinct biological sub-groups (**ALL** - Acute Lymphoblastic Leukemia vs. **AML** - Acute Myeloid Leukemia) and discover co-expressed gene signatures.
 
-* ALL (Acute Lymphoblastic Leukemia)
-* AML (Acute Myeloid Leukemia)
+## 🏗️ Project Architecture
+The project is strictly modularized adhering to professional software engineering practices:
 
-Pipeline bao gồm:
-
-* Tiền xử lý dữ liệu
-* Chuẩn hóa (Z-score)
-* Lọc gene theo phương sai
-* Tính khoảng cách
-* Phân cụm phân cấp (Hierarchical Clustering)
-* Trực quan hóa (Dendrogram, Heatmap)
-
----
-
-## 📂 Cấu trúc thư mục
-
-```
+```text
 gene_clustering_project/
+│
 ├── data/
-│   ├── raw/                      # Chứa dữ liệu gen gốc (không bao giờ sửa file ở đây)
-│   └── processed/                # Chứa dữ liệu đã qua làm sạch và chuẩn hóa
-├── src/                          # Thư mục chứa mã nguồn cốt lõi
+│   └── raw/
+│       └── data_set_ALL_AML_independent.csv  # Raw gene expression matrix
+│
+├── src/
 │   ├── __init__.py
-│   ├── data_preprocessing.py     # Code đọc, lọc gen, chuẩn hóa Z-score
-│   ├── metrics.py                # Code tính ma trận khoảng cách (Euclidean, Pearson)
-│   ├── clustering.py             # Code thuật toán Hierarchical, Lance-Williams
-│   └── visualization.py          # Code vẽ Dendrogram và Heatmap
-├── notebooks/
-│   └── biological_analysis.ipynb # Jupyter Notebook để phân tích kết quả sinh học
-├── tests/                        # Thư mục chứa các kịch bản kiểm thử
+│   ├── data_preprocessing.py                # Ingestion, Z-score, and Variance filtering
+│   ├── metrics.py                           # Vectorized Euclidean & Pearson distances
+│   ├── clustering.py                        # From-scratch Agglomerative Clustering engine
+│   ├── visualization.py                     # Plotting logic for Dendrograms & Heatmaps
+│   └── evaluation.py                        # Automated K selection (Elbow & Silhouette)
+│
+├── tests/
 │   ├── __init__.py
-│   ├── test_metrics.py           # Test tính chính xác của hàm khoảng cách
-│   └── test_clustering.py        # Test logic gộp cụm xem có đúng thứ tự không
-├── results/                      # Nơi lưu các hình ảnh biểu đồ, file CSV kết quả
-├── main.py                       # File trung tâm để chạy toàn bộ quy trình từ A-Z
-├── requirements.txt              # Danh sách thư viện (numpy, pandas, matplotlib, seaborn...)
-├── .gitignore                    # Các file bỏ qua không đưa lên hệ thống 
-└── README.md                     # Tài liệu hướng dẫn cài đặt và chạy project
-
+│   ├── test_metrics.py                      # Unit tests for distance metrics
+│   └── test_clustering.py                   # Unit tests for clustering engine
+│
+├── results/                                 # Generated visual artifacts (.png)
+├── .gitignore                               # Cache and local environment exclusion
+├── Main.py                                  # Production pipeline entry point
+└── Hierarchical_Clustering_Analysis.ipynb   # Comprehensive research notebook
 ```
 
----
+## 🧠 Mathematical Foundations
 
-## ⚙️ Cài đặt
+### 1. Vectorized Distance Metrics
+To optimize computational performance and bypass inefficient Python loops, pairwise distances are computed via heavy matrix algebra utilizing **NumPy Vectorization**:
+* **Euclidean Distance (Patient Space):** Computes geometric distances by expanding the binomial square matrix-wise: 
+  $$||A - B||^2 = A^2 + B^2 - 2AB$$
+* **Pearson Correlation Distance (Gene Space):** Standardizes profiles to identify functional co-expression patterns independent of absolute scales:
+  $$d = 1 - r$$
 
-### 1. Clone repo
+### 2. Agglomerative Engine & Lance-Williams Formulations
+The clustering engine builds the entire dendrogram hierarchy from bottom-up. After merging two clusters $C_i$ and $C_j$ into a new cluster $C_k$, the distances to any other cluster $C_m$ are dynamically updated via the **Lance-Williams formula** without recomputing original pairwise points:
+
+* **Average Linkage (Default):**
+  $$d(C_k, C_m) = \frac{|C_i| \cdot d(C_i, C_m) + |C_j| \cdot d(C_j, C_m)}{|C_i| + |C_j|}$$
+* **Ward's Linkage:** Minimizes variance accumulation within clusters.
+
+## 🚀 Getting Started
+
+### Prerequisites
+Ensure you have Python installed. Clone the repository and install the required dependencies:
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/NTT555/gene_clustering_project.git
 cd gene_clustering_project
+pip install numpy pandas matplotlib seaborn scipy scikit-learn
 ```
 
-### 2. Tạo môi trường ảo (khuyến nghị)
-
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux / Mac
-venv\Scripts\activate     # Windows
-```
-
-### 3. Cài thư viện
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## ▶️ Cách chạy
-
-### ✔️ Chạy bằng script
-
+### Running the Production Pipeline
+To execute the entire end-to-end processing, clustering, evaluation, and visualization pipeline, run:
 ```bash
 python main.py
 ```
 
-### ✔️ Chạy bằng Jupyter Notebook
-
+### Running Automated Unit Tests
+To verify the mathematical integrity of the core engines, run the test suites:
 ```bash
-jupyter notebook
+python -m unittest discover -s tests
 ```
 
-Sau đó mở:
+## 📊 Model Evaluation & Stopping Criteria
+Determining the optimal number of clusters ($K$) is performed automatically via an explicit dual-axis evaluation script (`src/evaluation.py`):
+1.  **Elbow Method:** Tracks the monotonic increase in merge distances across the linkage matrix $Z$. A sharp structural "knee/elbow" indicates the saturation point of natural boundaries.
+2.  **Silhouette Analysis:** Computes intra-cluster cohesion versus inter-cluster separation to benchmark clustering quality.
 
-```
-notebooks/gene_clustering_notebook.ipynb
-```
+The pipeline successfully validates $K=2$ as the mathematical optimal choice, aligning seamlessly with the biological reality of the **ALL/AML** patient split.
 
----
-
-## 📊 Pipeline xử lý
-
-1. **Load dữ liệu**
-2. **Clean dữ liệu**
-
-   * Loại bỏ cột không phải số
-3. **Chuẩn hóa Z-score**
-4. **Chọn top gene theo variance**
-5. **Tính khoảng cách**
-
-   * Euclidean
-   * Pearson
-6. **Phân cụm (Agglomerative Clustering)**
-7. **Visualization**
-
-   * Dendrogram
-   * Heatmap
-
----
-
-## 📈 Ví dụ sử dụng
-
-```python
-from data_preprocessing import load_and_clean_data, normalize_zscore
-from metrics import calculate_euclidean_distance
-from clustering import AgglomerativeClustering
-
-df = load_and_clean_data("data/raw/data_set_ALL_AML_independent.csv")
-df_norm = normalize_zscore(df)
-
-distance_matrix = calculate_euclidean_distance(df_norm)
-
-model = AgglomerativeClustering()
-model.fit(distance_matrix)
-```
-
----
-
-## ⚠️ Lỗi thường gặp
-
-### ❌ ModuleNotFoundError
-
-👉 Fix:
-
-```python
-import sys
-sys.path.append("src")
-```
-
----
-
-### ❌ FileNotFoundError
-
-👉 Kiểm tra path:
-
-```python
-import os
-print(os.getcwd())
-```
-
----
-
-## 🧠 Ý nghĩa sinh học
-
-* Giúp phân biệt ALL vs AML dựa trên gene expression
-* Tìm ra các gene quan trọng có độ biến thiên cao
-* Hỗ trợ nghiên cứu ung thư và chẩn đoán
-
----
-
-## 🚀 Hướng phát triển
-
-* Thêm PCA / t-SNE visualization
-* Áp dụng K-means / DBSCAN
-* Feature selection nâng cao
-* Tích hợp machine learning classifier
+## 🎨 Visual Artifacts
+Upon execution, the following production-grade plots are exported to the `results/` directory:
+* `patients_dendro.png`: Hierarchical tree structure classifying patient cohorts.
+* `genes_dendro.png`: Hierarchy highlighting genetic correlation networks.
+* `patients_evaluation_k.png`: Combined Line Chart showing Elbow and Silhouette results.
+* `biclustering_heatmap.png`: A comprehensive dual-clustered heatmap revealing clean checkboard blocks (Gene Signatures) representing genetic biomarkers for Leukemia classification.
